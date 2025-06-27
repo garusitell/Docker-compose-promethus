@@ -1,0 +1,137 @@
+# Docker Compose 파일 형식 버전을 지정합니다.
+version: '3.8'
+
+# 관리할 서비스(컨테이너)들의 묶음입니다.
+services:
+  # 1. Spring Boot 애플리케이션 서비스
+  spring-app:
+    # 현재 디렉토리의 Dockerfile을 사용하여 이미지를 빌드합니다.
+    build: .
+    # 컨테이너의 이름을 지정합니다.
+    container_name: spring-app
+    # 호스트의 8080 포트와 컨테이너의 8080 포트를 연결합니다.
+    ports:
+      - "8080:8080"
+    # 컨테이너 내부에서 사용할 환경 변수를 설정합니다.
+    # application.yml에서 이 값들을 참조합니다.
+    environment:
+      DB_URL: jdbc:mysql://mysql-db:3306/k6_demo_db?useSSL=false&allowPublicKeyRetrieval=true
+      DB_USER: user
+      DB_PASSWORD: password
+    # mysql-db 서비스가 시작된 후에 이 서비스가 시작되도록 의존성을 설정합니다.
+    depends_on:
+      - mysql-db
+    # 컨테이너가 예기치 않게 종료되면 항상 다시 시작합니다.
+    restart: always
+    # 개발 모드(watch) 설정을 추가합니다.
+    develop:
+      watch:
+        # 파일 변경 시 'rebuild' 액션을 수행합니다. (서비스 재빌드 및 교체)
+        - action: rebuild
+          # 감시할 경로를 지정합니다.
+          path: ./src
+        - action: rebuild
+          path: ./build.gradle
+        - action: rebuild
+          path: ./settings.gradle
+    # ======================================================= #
+    # <<< ⭐ 이 healthcheck 블록을 추가해주세요 ⭐ >>>
+    ##healthcheck:
+      # CMD-SHELL을 사용하여 쉘 환경에서 명령어를 실행합니다.
+      # curl 명령이 실패할 경우(||), 확실하게 실패 코드(1)를 반환합니다.
+    ##  test: [ "CMD-SHELL", "curl --fail http://localhost:8080/actuator/health || exit 1" ]
+    ##  interval: 10s
+    ##  timeout: 5s
+    #  retries: 5
+      # 혹시 모를 느린 시작에 대비해 시작 유예 시간은 60초로 넉넉하게 유지합니다.
+    #  start_period: 60s
+    # ======================================================= #
+
+
+
+  # 2. MySQL 데이터베이스 서비스
+  mysql-db:
+    # 사용할 Docker 이미지를 지정합니다.
+    image: mysql:8.0
+    container_name: mysql-db
+    ports:
+      - "3307:3306"
+    # MySQL 초기 설정을 위한 환경 변수입니다.
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: k6_demo_db # spring-app이 사용할 데이터베이스
+      MYSQL_USER: user
+      MYSQL_PASSWORD: password
+    # 데이터를 영속적으로 보관하기 위해 호스트의 볼륨과 연결합니다.
+    volumes:
+      - mysql-data:/var/lib/mysql
+    restart: always
+
+  # 3. Prometheus 모니터링 서비스
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    # 호스트의 prometheus.yml 설정 파일을 컨테이너 내부로 마운트합니다.
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    # 컨테이너 시작 시 실행할 명령어입니다. (설정 파일 지정)
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+    # ======================================================= #
+    # <<< ⭐ 이 depends_on 부분을 아래와 같이 수정해주세요 ⭐ >>>
+    #depends_on:
+    #  spring-app:
+    #    condition: service_healthy # 'spring-app'이 healthy 상태가 될 때까지 기다림
+    # ======================================================= #
+    depends_on:
+      - spring-app
+    restart: always
+
+  # 4. Grafana 시각화 대시보드 서비스
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    # Grafana 초기 관리자 계정 정보를 설정합니다.
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - prometheus
+    restart: always
+
+    # ======================================================= #
+    # <<< ⭐ 데이터를 영속적으로 저장하기 위해 이 부분을 추가합니다. ⭐ >>>
+    volumes:
+      - grafana-data:/var/lib/grafana
+    # ======================================================= #
+
+
+
+  # ======================================================= #
+  # <<< ⭐ k6 서비스 최종 수정본 ⭐ >>>
+  # 5. k6 부하 테스트 서비스
+  k6:
+    image: grafana/k6:latest
+    container_name: k6
+    ports:
+      - "6565:6565"
+    # [수정 1] tests 폴더 전체를 컨테이너의 /tests 폴더로 연결합니다.
+    volumes:
+      - ./test_js:/tests
+    # [수정 2] k6가 spring-app에 의존하도록 설정합니다.
+    depends_on:
+      - spring-app
+    # [수정 3] command와 profiles를 삭제하여 run 명령어로 제어하도록 합니다.
+  # ======================================================= #
+
+# 데이터베이스 데이터를 저장할 명명된 볼륨을 정의합니다.
+volumes:
+  mysql-data:
+  # ======================================================= #
+  # <<< ⭐ Grafana 데이터를 위한 볼륨을 여기에 추가합니다. ⭐ >>>
+  grafana-data:
+  # ======================================================= #

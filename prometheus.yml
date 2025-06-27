@@ -1,0 +1,18 @@
+# 파일명: prometheus.yml
+
+global:
+  scrape_interval: 15s # 15초마다 메트릭을 수집하는 것이 기본 설정
+
+# 메트릭을 수집할 대상(Job) 목록
+scrape_configs:
+  # 'spring-boot-app' 이라는 이름의 Job 정의
+  - job_name: 'spring-boot-app'
+    # 메트릭을 가져올 경로
+    metrics_path: '/actuator/prometheus'
+    # 이 Job은 5초마다 수집하도록 설정
+    scrape_interval: 5s
+    # 고정된 대상 목록
+    static_configs:
+      # 'spring-app:8080'을 대상으로 지정
+      # 'spring-app'은 docker-compose.yml에 정의된 Spring Boot 서비스의 이름
+      - targets: ['spring-app:8080']
